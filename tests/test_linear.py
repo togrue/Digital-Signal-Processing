@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 
-from linear_frac_rms import LinearRmsEstimate, linear_fractional_rms
+from dsp.rms import LinearRmsEstimate, linear_fractional_rms
 
 
 FS = 102400.0
@@ -133,6 +133,21 @@ def test_phase_stability_slow_sine():
         errors.append(abs(est.rms - ACCURATE) / ACCURATE * 1e6)
     assert float(np.median(errors)) < 20.0
     assert float(np.max(errors)) < 200.0
+
+
+def test_no_drift_phase_stream_accuracy():
+    """Without drift, period must not be biased by the rough linear detrend."""
+    duration = 15.0
+    freq = 1000.0 / (2 * np.pi)
+    t = np.arange(0, duration, 1 / FS)
+    y = np.sqrt(2.0) * ACCURATE * np.sin(2 * np.pi * freq * t + 0.1)
+    errors = []
+    for start in range(0, y.size - N + 1, N):
+        est = linear_fractional_rms(y[start : start + N], FS)
+        assert est.strategy == "linear_frac"
+        errors.append(abs(est.rms - ACCURATE) / ACCURATE * 1e6)
+    assert float(np.median(errors)) < 0.1
+    assert float(np.max(errors)) < 1.0
 
 
 def test_float32_input_accepted():

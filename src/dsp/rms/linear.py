@@ -9,6 +9,12 @@ fractional and centered on each fit node: edges at ``±L/2`` give partial
 weights on the first and last samples (each about ``{L}/2`` when that is
 below half a sample).
 
+Period is refined in two passes: a rough linear detrend gives an initial
+period and MA line; zero crossings are then re-taken on that residual and
+the line is refit. A single raw-signal linear detrend correlates with a
+non-integer-period tone and biases the period (tens of ppm of RMS) even
+when no drift is present.
+
 If the window cannot support that path, the plain window AC RMS is returned
 and ``strategy`` names the fallback.
 """
@@ -196,6 +202,20 @@ def linear_fractional_rms(y_win, fs: float) -> LinearRmsEstimate:
         return LinearRmsEstimate(_window_ac_rms(y), "window_ac")
 
     intercept, slope = fit
+
+    # Refine period on the MA-detrended residual so a non-integer-period
+    # tone cannot bias the rough linear detrend into a wrong period.
+    t = np.arange(y.size, dtype=np.float64)
+    zc2 = _frac_zero_crossings(y - (intercept + slope * t))
+    if zc2 is not None:
+        zero_a, zero_b, n_per = zc2
+        period2 = (zero_b - zero_a) / n_per
+        if math.isfinite(period2) and period2 > 1.0 and y.size / period2 >= 1.95:
+            fit2 = _linear_from_moving_average(y, period2)
+            if fit2 is not None:
+                period = period2
+                intercept, slope = fit2
+
     n_frac = zero_b - zero_a
     i0 = int(zero_a)
     if i0 < 0 or i0 + math.ceil(n_frac) > y.size:
@@ -210,34 +230,4 @@ def linear_fractional_rms(y_win, fs: float) -> LinearRmsEstimate:
         strategy="linear_frac",
         frequency_hz=fs / period,
         period_samples=period,
-    )
-
-
-if __name__ == "__main__":
-    import time
-
-    fs = 102400.0
-    window = 16384
-    t = np.arange(0.0, 15.0, 1.0 / fs)
-    tone = 1000.0 / (2.0 * np.pi)
-    signal = 10.0 * np.exp(-t / 2.5) + np.sqrt(2.0) * np.sin(2 * np.pi * tone * t + 0.1)
-
-    def once():
-        return [
-            linear_fractional_rms(signal[s : s + window], fs)
-            for s in range(0, signal.size - window + 1, window)
-        ]
-
-    once()
-    times = []
-    for _ in range(5):
-        t0 = time.perf_counter()
-        found = once()
-        times.append(time.perf_counter() - t0)
-    elapsed = min(times)
-    ppm = np.array([abs(est.rms - 1.0) * 1e6 for est in found if est.strategy == "linear_frac"])
-    print(
-        f"{len(found)} windows in {elapsed:.3f} s "
-        f"({elapsed / len(found) * 1e3:.3f} ms/window), "
-        f"median |error| {np.median(ppm):.3f} ppm, max {np.max(ppm):.3f} ppm"
     )

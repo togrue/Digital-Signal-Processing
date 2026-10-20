@@ -562,38 +562,3 @@ def cubic_fractional_rms(
         trustworthy=True,
         reason=_method_reason(chosen),
     )
-
-
-if __name__ == "__main__":
-    import time
-
-    sim_duration = 15.0
-    sample_rate = 102400.0
-    t = np.arange(0, sim_duration, 1 / sample_rate)
-    accurate = 1.0
-    tone = 1000 / (2 * np.pi)
-    y = 10 * np.exp(-t / 2.5) + np.sqrt(2) * accurate * np.sin(2 * np.pi * tone * t + 0.1)
-    window = 16384
-
-    def once():
-        found = []
-        period = None
-        for start in range(0, y.size - window + 1, window):
-            est = cubic_fractional_rms(y[start:start + window], sample_rate, period)
-            period = est.period_samples
-            found.append(est)
-        return found
-
-    once()
-    t0 = time.perf_counter()
-    found = once()
-    elapsed = time.perf_counter() - t0
-    ppm = np.array([abs(est.rms - accurate) / accurate * 1e6 for est in found])
-    methods = {est.method for est in found}
-    trusted = sum(est.trustworthy for est in found)
-    print(
-        f"{len(found)} windows in {elapsed:.3f} s "
-        f"({elapsed / len(found) * 1e3:.2f} ms/window), "
-        f"median |error| {np.median(ppm):.4f} ppm, max {np.max(ppm):.4f} ppm, "
-        f"methods {sorted(methods)}, trustworthy {trusted}/{len(found)}"
-    )

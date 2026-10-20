@@ -7,7 +7,7 @@ import time
 import numpy as np
 from numba import njit
 
-import linear_frac_rms_numba as m
+import dsp.rms.linear_numba as m
 
 FS = 102400.0
 N = 16384

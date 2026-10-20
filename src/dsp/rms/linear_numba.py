@@ -207,6 +207,10 @@ def _linear_fractional_rms_core(y, fs):
     """Return (strategy_code, rms, frequency_hz, period_samples).
 
     Caller must pass a non-empty finite contiguous float64 window.
+
+    Two-pass period: rough linear detrend → MA line → re-ZC on residual →
+    refit. Avoids period bias from correlating a non-integer-period tone
+    with the rough linear detrend.
     """
     n = y.shape[0]
     work = np.empty(n, dtype=np.float64)
@@ -225,6 +229,20 @@ def _linear_fractional_rms_core(y, fs):
     ok, intercept, slope = _linear_from_moving_average(y, period)
     if ok == 0:
         return _STR_WINDOW_AC, _window_ac_rms(y), np.nan, np.nan
+
+    for i in range(n):
+        work[i] = y[i] - (intercept + slope * i)
+    ok2, zero_a2, zero_b2, n_per2 = _frac_zero_crossings(work)
+    if ok2 != 0:
+        period2 = (zero_b2 - zero_a2) / n_per2
+        if math.isfinite(period2) and period2 > 1.0 and n / period2 >= 1.95:
+            ok3, intercept2, slope2 = _linear_from_moving_average(y, period2)
+            if ok3 != 0:
+                period = period2
+                intercept = intercept2
+                slope = slope2
+                zero_a = zero_a2
+                zero_b = zero_b2
 
     n_frac = zero_b - zero_a
     i0 = int(zero_a)
@@ -267,44 +285,3 @@ def linear_fractional_rms(y_win, fs: float) -> LinearRmsEstimate:
 def warmup(n: int = 16384, fs: float = 102400.0) -> None:
     """Compile the JIT kernels on a dummy window."""
     linear_fractional_rms(np.zeros(n, dtype=np.float64), fs)
-
-
-if __name__ == "__main__":
-    import time
-
-    from linear_frac_rms import linear_fractional_rms as linear_numpy
-
-    fs = 102400.0
-    window = 16384
-    t = np.arange(0.0, 15.0, 1.0 / fs)
-    tone = 1000.0 / (2.0 * np.pi)
-    signal = 10.0 * np.exp(-t / 2.5) + np.sqrt(2.0) * np.sin(2 * np.pi * tone * t + 0.1)
-    starts = list(range(0, signal.size - window + 1, window))
-
-    print("compiling…")
-    warmup(window, fs)
-
-    def bench(fn, repeats=7):
-        def once():
-            return [fn(signal[s : s + window], fs) for s in starts]
-
-        once()
-        times = []
-        for _ in range(repeats):
-            t0 = time.perf_counter()
-            out = once()
-            times.append(time.perf_counter() - t0)
-        return min(times), out
-
-    t_np, out_np = bench(linear_numpy)
-    t_nb, out_nb = bench(linear_fractional_rms)
-    n = len(starts)
-    print(f"numpy:  {t_np / n * 1e3:.3f} ms/win")
-    print(f"numba:  {t_nb / n * 1e3:.3f} ms/win  ({t_np / t_nb:.2f}× vs numpy)")
-
-    max_diff = max(abs(a.rms - b.rms) for a, b in zip(out_np, out_nb))
-    strat_ok = all(a.strategy == b.strategy for a, b in zip(out_np, out_nb))
-    ppm = np.array([abs(e.rms - 1.0) * 1e6 for e in out_nb if e.strategy == "linear_frac"])
-    print(f"max |rms diff| vs numpy: {max_diff:.3e}")
-    print(f"strategies match: {strat_ok}")
-    print(f"numba median |error| {np.median(ppm):.3f} ppm, max {np.max(ppm):.3f} ppm")

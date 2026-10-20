@@ -7,9 +7,9 @@ import math
 import numpy as np
 import pytest
 
-from linear_frac_rms import linear_fractional_rms as numpy_rms
-from linear_frac_rms_numba import linear_fractional_rms as numba_rms
-from linear_frac_rms_numba import warmup
+from dsp.rms import linear_fractional_rms as numpy_rms
+from dsp.rms.linear_numba import linear_fractional_rms as numba_rms
+from dsp.rms.linear_numba import warmup
 
 FS = 102400.0
 N = 16384
